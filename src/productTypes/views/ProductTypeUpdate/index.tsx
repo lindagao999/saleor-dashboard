@@ -1,0 +1,532 @@
+// @ts-strict-ignore
+import { type AttributePageFormData } from "@dashboard/attributes/components/AttributePage";
+import AssignAttributeDialog from "@dashboard/components/AssignAttributeDialog";
+import { AttributeUnassignDialog } from "@dashboard/components/AttributeUnassignDialog";
+import { BulkAttributeUnassignDialog } from "@dashboard/components/BulkAttributeUnassignDialog";
+import { Button } from "@dashboard/components/Button";
+import {
+  type AttributeCreateSubmitData,
+  CreateAttributeDialog,
+} from "@dashboard/components/CreateAttributeDialog/CreateAttributeDialog";
+import { messages as createAttributeMessages } from "@dashboard/components/CreateAttributeDialog/messages";
+import NotFoundPage from "@dashboard/components/NotFoundPage";
+import TypeDeleteWarningDialog from "@dashboard/components/TypeDeleteWarningDialog";
+import { WindowTitle } from "@dashboard/components/WindowTitle";
+import { DEFAULT_INITIAL_SEARCH_DATA } from "@dashboard/config";
+import {
+  type AssignProductAttributeMutation,
+  AttributeErrorCode,
+  type AttributeErrorFragment,
+  AttributeTypeEnum,
+  ProductAttributeType,
+  type ProductTypeAttributeReorderMutation,
+  type ProductTypeDeleteMutation,
+  type UnassignProductAttributeMutation,
+  useAssignProductAttributeMutation,
+  useAttributeCreateMutation,
+  useProductAttributeAssignmentUpdateMutation,
+  useProductTypeDetailsQuery,
+  useProductTypeUpdateMutation,
+  useUpdateMetadataMutation,
+  useUpdatePrivateMetadataMutation,
+} from "@dashboard/graphql";
+import useBulkActions from "@dashboard/hooks/useBulkActions";
+import { useListSelectedItems } from "@dashboard/hooks/useListSelectedItems";
+import useNavigator from "@dashboard/hooks/useNavigator";
+import { useNotifier } from "@dashboard/hooks/useNotifier";
+import { getStringOrPlaceholder, maybe } from "@dashboard/misc";
+import useProductTypeDelete from "@dashboard/productTypes/hooks/useProductTypeDelete";
+import useProductTypeOperations from "@dashboard/productTypes/hooks/useProductTypeOperations";
+import useAvailableProductAttributeSearch from "@dashboard/searches/useAvailableProductAttributeSearch";
+import { useTaxClassFetchMore } from "@dashboard/taxes/utils/useTaxClassFetchMore";
+import { type ReorderEvent } from "@dashboard/types";
+import { getProductErrorMessage } from "@dashboard/utils/errors";
+import createDialogActionHandlers from "@dashboard/utils/handlers/dialogActionHandlers";
+import createMetadataCreateHandler from "@dashboard/utils/handlers/metadataCreateHandler";
+import { mapEdgesToItems } from "@dashboard/utils/maps";
+import { useState } from "react";
+import { FormattedMessage, useIntl } from "react-intl";
+
+import ProductTypeDetailsPage, {
+  type ProductTypeForm,
+} from "../../components/ProductTypeDetailsPage";
+import { ProductTypeMetadataDialog } from "../../components/ProductTypeMetadataDialog/ProductTypeMetadataDialog";
+import { executeProductTypeAttributeCreate } from "../../handlers/productTypeAttributeCreateHandler";
+import {
+  productTypeListUrl,
+  productTypeUrl,
+  type ProductTypeUrlDialog,
+  type ProductTypeUrlQueryParams,
+} from "../../urls";
+
+interface ProductTypeUpdateProps {
+  id: string;
+  params: ProductTypeUrlQueryParams;
+}
+
+const ProductTypeUpdate = ({ id, params }: ProductTypeUpdateProps) => {
+  const navigate = useNavigator();
+  const notify = useNotifier();
+  const [openModal, closeModal] = createDialogActionHandlers<
+    ProductTypeUrlDialog,
+    ProductTypeUrlQueryParams
+  >(navigate, dialogParams => productTypeUrl(id, dialogParams), params);
+  const productAttributeListActions = useBulkActions();
+  const variantAttributeListActions = useBulkActions();
+  const assignAttributesActions = useListSelectedItems<string>();
+  const intl = useIntl();
+  const { loadMore, search, result } = useAvailableProductAttributeSearch({
+    variables: {
+      ...DEFAULT_INITIAL_SEARCH_DATA,
+      id,
+    },
+  });
+  const [errors, setErrors] = useState({
+    addAttributeErrors: [],
+    editAttributeErrors: [],
+    formErrors: [],
+  });
+  const [updateProductType, updateProductTypeOpts] = useProductTypeUpdateMutation({
+    // Field errors are rendered inline on the product type form.
+    disableErrorHandling: true,
+    onCompleted: updateData => {
+      if (
+        !updateData.productTypeUpdate.errors ||
+        updateData.productTypeUpdate.errors.length === 0
+      ) {
+        notify({
+          status: "success",
+          text: intl.formatMessage({ id: "6j4TUi", defaultMessage: "Product type updated" }),
+        });
+      } else if (
+        updateData.productTypeUpdate.errors !== null &&
+        updateData.productTypeUpdate.errors.length > 0
+      ) {
+        setErrors(prevErrors => ({
+          ...prevErrors,
+          formErrors: updateData.productTypeUpdate.errors,
+        }));
+      }
+    },
+  });
+  const [updateProductAttributes, updateProductAttributesOpts] =
+    useProductAttributeAssignmentUpdateMutation({
+      // Field errors are rendered inline on the product type form.
+      disableErrorHandling: true,
+      onCompleted: updateData => {
+        if (
+          updateData.productAttributeAssignmentUpdate.errors !== null &&
+          updateData.productAttributeAssignmentUpdate.errors.length > 0
+        ) {
+          setErrors(prevErrors => ({
+            ...prevErrors,
+            formErrors: updateData.productAttributeAssignmentUpdate.errors,
+          }));
+        }
+      },
+    });
+  const [updateMetadata] = useUpdateMetadataMutation({});
+  const [updatePrivateMetadata] = useUpdatePrivateMetadataMutation({});
+  const [assignCreatedAttribute, assignCreatedAttributeOpts] = useAssignProductAttributeMutation();
+  const [attributeCreate, attributeCreateOpts] = useAttributeCreateMutation();
+  const [selectedVariantAttributes, setSelectedVariantAttributes] = useState<string[]>([]);
+  const handleProductTypeUpdate = async (formData: ProductTypeForm) => {
+    const operations = formData.variantAttributes.map(variantAttribute => ({
+      id: variantAttribute.value,
+      variantSelection: selectedVariantAttributes.includes(variantAttribute.value),
+    }));
+    const productAttributeUpdateResult = await updateProductAttributes({
+      variables: {
+        productTypeId: id,
+        operations,
+      },
+    });
+    const result = await updateProductType({
+      variables: {
+        id,
+        input: {
+          hasVariants: formData.hasVariants,
+          isShippingRequired: formData.isShippingRequired,
+          name: formData.name,
+          kind: formData.kind,
+          productAttributes: formData.productAttributes.map(choice => choice.value),
+          taxClass: formData.taxClassId,
+          variantAttributes: formData.variantAttributes.map(choice => choice.value),
+          weight: formData.weight,
+        },
+      },
+    });
+
+    return [
+      ...result.data.productTypeUpdate.errors,
+      ...productAttributeUpdateResult.data.productAttributeAssignmentUpdate.errors,
+    ];
+  };
+  const {
+    data,
+    loading: dataLoading,
+    refetch,
+  } = useProductTypeDetailsQuery({
+    displayLoader: true,
+    variables: { id },
+  });
+  const { taxClasses, fetchMoreTaxClasses } = useTaxClassFetchMore();
+  const productType = data?.productType;
+
+  const productTypeDeleteData = useProductTypeDelete({
+    singleId: id,
+    params,
+    typeBaseData: productType ? [productType] : undefined,
+  });
+  const createAttributeAssignmentType = ProductAttributeType[params.type];
+  const handleAttributeAssignSuccess = (data: AssignProductAttributeMutation) => {
+    if (data.productAttributeAssign.errors.length === 0) {
+      notify({
+        status: "success",
+        text: intl.formatMessage({ id: "6j4TUi", defaultMessage: "Product type updated" }),
+      });
+      closeModal();
+    } else if (
+      data.productAttributeAssign.errors !== null &&
+      data.productAttributeAssign.errors.length > 0
+    ) {
+      setErrors(prevErrors => ({
+        ...prevErrors,
+        addAttributeErrors: data.productAttributeAssign.errors,
+      }));
+    }
+  };
+  const handleAttributeUnassignSuccess = (data: UnassignProductAttributeMutation) => {
+    if (data.productAttributeUnassign.errors.length === 0) {
+      notify({
+        status: "success",
+        text: intl.formatMessage({ id: "6j4TUi", defaultMessage: "Product type updated" }),
+      });
+      closeModal();
+      productAttributeListActions.reset();
+      variantAttributeListActions.reset();
+    }
+  };
+  const handleProductTypeDeleteSuccess = (deleteData: ProductTypeDeleteMutation) => {
+    if (deleteData.productTypeDelete.errors.length === 0) {
+      notify({
+        status: "success",
+        text: intl.formatMessage({
+          id: "F3Upht",
+          defaultMessage: "Product type deleted",
+        }),
+      });
+      navigate(productTypeListUrl(), { replace: true });
+    }
+  };
+  const handleAttributeReorderSuccess = (data: ProductTypeAttributeReorderMutation) => {
+    if (data.productTypeReorderAttributes.errors.length === 0) {
+      notify({
+        status: "success",
+        text: intl.formatMessage({ id: "6j4TUi", defaultMessage: "Product type updated" }),
+      });
+    }
+  };
+  const { assignAttribute, deleteProductType, unassignAttribute, reorderAttribute } =
+    useProductTypeOperations({
+      onAssignAttribute: handleAttributeAssignSuccess,
+      onProductTypeAttributeReorder: handleAttributeReorderSuccess,
+      onProductTypeDelete: handleProductTypeDeleteSuccess,
+      onUnassignAttribute: handleAttributeUnassignSuccess,
+      productType: data?.productType,
+    });
+  const handleProductTypeDelete = () => deleteProductType.mutate({ id });
+  const handleProductTypeVariantsToggle = (hasVariants: boolean) =>
+    updateProductType({
+      variables: {
+        id,
+        input: {
+          hasVariants,
+        },
+      },
+    });
+  const handleAssignAttribute = async () => {
+    await assignAttribute.mutate({
+      id,
+      operations: assignAttributesActions.selectedItems.map(id => ({
+        id,
+        type: ProductAttributeType[params.type],
+      })),
+    });
+
+    assignAttributesActions.clearSelectedItems();
+  };
+  const handleCreateAttribute = async ({
+    formData,
+    values,
+  }: AttributeCreateSubmitData): Promise<AttributeErrorFragment[]> => {
+    if (!createAttributeAssignmentType) {
+      return [
+        {
+          __typename: "AttributeError",
+          code: AttributeErrorCode.INVALID,
+          field: null,
+          message: intl.formatMessage(createAttributeMessages.createFailed),
+        },
+      ];
+    }
+
+    const submitWithMetadata = createMetadataCreateHandler(
+      async (data: AttributePageFormData) => {
+        const outcome = await executeProductTypeAttributeCreate(
+          {
+            productTypeId: id,
+            productAttributeType: createAttributeAssignmentType,
+            formData: data,
+            values,
+            createFailedMessage: intl.formatMessage(createAttributeMessages.createFailed),
+            formatAssignErrors: errors =>
+              errors.map(error => getProductErrorMessage(error, intl)).join(" "),
+          },
+          {
+            attributeCreate,
+            assignCreatedAttribute,
+          },
+        );
+
+        if (outcome.assignErrorMessage) {
+          notify({
+            status: "error",
+            text: outcome.assignErrorMessage,
+          });
+        }
+
+        return outcome;
+      },
+      updateMetadata,
+      updatePrivateMetadata,
+      () => {
+        notify({
+          status: "success",
+          text: intl.formatMessage(createAttributeMessages.createdAndAssigned),
+        });
+        closeModal();
+      },
+    );
+
+    return (await submitWithMetadata(formData)) as AttributeErrorFragment[];
+  };
+  const handleAttributeUnassign = () =>
+    unassignAttribute.mutate({
+      id,
+      ids: [params.id],
+    });
+  const handleBulkProductAttributeUnassign = () =>
+    unassignAttribute.mutate({
+      id,
+      ids: productAttributeListActions.listElements,
+    });
+  const handleBulkVariantAttributeUnassign = () =>
+    unassignAttribute.mutate({
+      id,
+      ids: variantAttributeListActions.listElements,
+    });
+  const loading =
+    updateProductTypeOpts.loading || updateProductAttributesOpts.loading || dataLoading;
+  const handleAttributeReorder = (event: ReorderEvent, type: ProductAttributeType) => {
+    const attributes =
+      type === ProductAttributeType.PRODUCT
+        ? data.productType.productAttributes
+        : data.productType.variantAttributes;
+
+    reorderAttribute.mutate({
+      move: {
+        id: attributes[event.oldIndex].id,
+        sortOrder: event.newIndex - event.oldIndex,
+      },
+      productTypeId: id,
+      type,
+    });
+  };
+
+  if (productType === null) {
+    return <NotFoundPage backHref={productTypeListUrl()} />;
+  }
+
+  return (
+    <>
+      <WindowTitle title={maybe(() => data.productType.name)} />
+      <ProductTypeDetailsPage
+        defaultWeightUnit={maybe(() => data.shop.defaultWeightUnit)}
+        disabled={loading}
+        errors={errors.formErrors}
+        productType={maybe(() => data.productType)}
+        saveButtonBarState={updateProductTypeOpts.status || updateProductAttributesOpts.status}
+        taxClasses={taxClasses ?? []}
+        selectedVariantAttributes={selectedVariantAttributes}
+        setSelectedVariantAttributes={setSelectedVariantAttributes}
+        onAttributeAdd={type =>
+          openModal("assign-attribute", {
+            type,
+          })
+        }
+        onAttributeCreate={type =>
+          openModal("create-attribute", {
+            type,
+          })
+        }
+        onAttributeReorder={handleAttributeReorder}
+        onAttributeUnassign={attributeId =>
+          openModal("unassign-attribute", {
+            id: attributeId,
+          })
+        }
+        onDelete={() => openModal("remove")}
+        onShowMetadata={() => openModal("view-metadata", { id: undefined })}
+        onHasVariantsToggle={handleProductTypeVariantsToggle}
+        onSubmit={handleProductTypeUpdate}
+        productAttributeList={{
+          isChecked: productAttributeListActions.isSelected,
+          selected: productAttributeListActions.listElements.length,
+          toggle: productAttributeListActions.toggle,
+          toggleAll: productAttributeListActions.toggleAll,
+          toolbar: (
+            <Button onClick={() => openModal("unassign-product-attributes")}>
+              <FormattedMessage
+                id="S7j+Wf"
+                defaultMessage="Unassign"
+                description="unassign attribute from product type, button"
+              />
+            </Button>
+          ),
+        }}
+        variantAttributeList={{
+          isChecked: variantAttributeListActions.isSelected,
+          selected: variantAttributeListActions.listElements.length,
+          toggle: variantAttributeListActions.toggle,
+          toggleAll: variantAttributeListActions.toggleAll,
+          toolbar: (
+            <Button onClick={() => openModal("unassign-variant-attributes")}>
+              <FormattedMessage
+                id="S7j+Wf"
+                defaultMessage="Unassign"
+                description="unassign attribute from product type, button"
+              />
+            </Button>
+          ),
+        }}
+        onFetchMoreTaxClasses={fetchMoreTaxClasses}
+      />
+      {!dataLoading && (
+        <>
+          {Object.keys(ProductAttributeType).map(key => (
+            <AssignAttributeDialog
+              attributes={mapEdgesToItems(result?.data?.productType?.availableAttributes)}
+              confirmButtonState={assignAttribute.opts.status}
+              errors={maybe(
+                () =>
+                  assignAttribute.opts.data.productAttributeAssign.errors.map(err => err.message),
+                [],
+              )}
+              loading={result.loading}
+              onClose={() => {
+                closeModal();
+                assignAttributesActions.clearSelectedItems();
+              }}
+              onSubmit={handleAssignAttribute}
+              onFetch={search}
+              onFetchMore={loadMore}
+              onOpen={result.refetch}
+              hasMore={maybe(
+                () => result.data.productType.availableAttributes.pageInfo.hasNextPage,
+                false,
+              )}
+              open={
+                params.action === "assign-attribute" && params.type === ProductAttributeType[key]
+              }
+              selected={assignAttributesActions.selectedItems}
+              onToggle={assignAttributesActions.toggleSelectItem}
+              key={key}
+            />
+          ))}
+          {productType && (
+            <>
+              <ProductTypeMetadataDialog
+                open={params.action === "view-metadata" && !!productType}
+                onClose={closeModal}
+                productType={productType}
+                refetchProductType={refetch}
+              />
+              <CreateAttributeDialog
+                attributeType={AttributeTypeEnum.PRODUCT_TYPE}
+                confirmButtonState={
+                  attributeCreateOpts.loading || assignCreatedAttributeOpts.loading
+                    ? "loading"
+                    : attributeCreateOpts.status
+                }
+                contextName={productType.name}
+                disabled={attributeCreateOpts.loading || assignCreatedAttributeOpts.loading}
+                errors={attributeCreateOpts.data?.attributeCreate?.errors ?? []}
+                open={
+                  params.action === "create-attribute" && Boolean(createAttributeAssignmentType)
+                }
+                onClose={closeModal}
+                onSubmit={handleCreateAttribute}
+              />
+            </>
+          )}
+          {productType && (
+            <TypeDeleteWarningDialog
+              {...productTypeDeleteData}
+              typesData={[productType]}
+              typesToDelete={[id]}
+              onClose={closeModal}
+              onDelete={handleProductTypeDelete}
+              deleteButtonState={deleteProductType.opts.status}
+            />
+          )}
+        </>
+      )}
+
+      <BulkAttributeUnassignDialog
+        title={intl.formatMessage({
+          id: "r1aQ2f",
+          defaultMessage: "Unassign Attribute from Product Type",
+          description: "dialog header",
+        })}
+        attributeQuantity={
+          params.action === "unassign-product-attributes"
+            ? productAttributeListActions.listElements.length
+            : variantAttributeListActions.listElements.length
+        }
+        confirmButtonState={unassignAttribute.opts.status}
+        onClose={closeModal}
+        onConfirm={
+          params.action === "unassign-product-attributes"
+            ? handleBulkProductAttributeUnassign
+            : handleBulkVariantAttributeUnassign
+        }
+        open={["unassign-product-attributes", "unassign-variant-attributes"].includes(
+          params.action,
+        )}
+        itemTypeName={getStringOrPlaceholder(data?.productType.name)}
+      />
+      <AttributeUnassignDialog
+        title={intl.formatMessage({
+          id: "UJnqdm",
+          defaultMessage: "Unassign Attribute From Product Type",
+          description: "dialog header",
+        })}
+        attributeName={maybe(
+          () =>
+            [...data.productType.productAttributes, ...data.productType.variantAttributes].find(
+              attribute => attribute.id === params.id,
+            ).name,
+          "...",
+        )}
+        confirmButtonState={unassignAttribute.opts.status}
+        onClose={closeModal}
+        onConfirm={handleAttributeUnassign}
+        open={params.action === "unassign-attribute"}
+        itemTypeName={getStringOrPlaceholder(data?.productType.name)}
+      />
+    </>
+  );
+};
+
+export default ProductTypeUpdate;

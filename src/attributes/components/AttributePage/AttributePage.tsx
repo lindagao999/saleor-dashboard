@@ -1,0 +1,405 @@
+import {
+  AttributeAssignedTypesCard,
+  type AttributeAssignedTypesCardProps,
+} from "@dashboard/attributes/components/AttributeAssignedTypesCard/AttributeAssignedTypesCard";
+import { rippleAttributeViewOverhaul } from "@dashboard/attributes/ripples/attributeViewOverhaul";
+import { attributeListPath } from "@dashboard/attributes/urls";
+import {
+  getAttributePageInitialForm,
+  isAttributeUpdateFormPristine,
+} from "@dashboard/attributes/utils/attributePageForm";
+import {
+  ATTRIBUTE_TYPES_WITH_DEDICATED_VALUES,
+  ENTITY_TYPES_WITH_TYPES_RESTRICTION,
+  REFERENCE_ATTRIBUTE_TYPES,
+} from "@dashboard/attributes/utils/data";
+import { hasPermission } from "@dashboard/auth/misc";
+import { useUser } from "@dashboard/auth/useUser";
+import { TopNav } from "@dashboard/components/AppLayout/TopNav";
+import CardSpacer from "@dashboard/components/CardSpacer";
+import { type ConfirmButtonTransitionState } from "@dashboard/components/ConfirmButton";
+import Form from "@dashboard/components/Form";
+import { DetailPageLayout } from "@dashboard/components/Layouts";
+import { Metadata } from "@dashboard/components/Metadata/Metadata";
+import { type MetadataFormData } from "@dashboard/components/Metadata/types";
+import { Savebar } from "@dashboard/components/Savebar";
+import { type ListSettingsUpdate } from "@dashboard/components/TablePagination";
+import { DEFAULT_INITIAL_SEARCH_DATA } from "@dashboard/config";
+import {
+  type AttributeDetailsQuery,
+  AttributeEntityTypeEnum,
+  type AttributeErrorFragment,
+  type AttributeInputTypeEnum,
+  type AttributeTypeEnum,
+  type MeasurementUnitsEnum,
+  PermissionEnum,
+} from "@dashboard/graphql";
+import { type CommonSearchOpts } from "@dashboard/hooks/makeTopLevelSearch/types";
+import { getSearchFetchMoreProps } from "@dashboard/hooks/makeTopLevelSearch/utils";
+import { useBackLinkWithState } from "@dashboard/hooks/useBackLinkWithState";
+import { type ChangeEvent, type SubmitPromise } from "@dashboard/hooks/useForm";
+import useNavigator from "@dashboard/hooks/useNavigator";
+import usePageTypeSearch from "@dashboard/searches/usePageTypeSearch";
+import useProductTypeSearch from "@dashboard/searches/useProductTypeSearch";
+import { TranslationsButton } from "@dashboard/translations/components/TranslationsButton/TranslationsButton";
+import { languageEntityUrl, TranslatableEntities } from "@dashboard/translations/urls";
+import { useCachedLocales } from "@dashboard/translations/useCachedLocales";
+import { type ListSettings, type ReorderAction } from "@dashboard/types";
+import { mapEdgesToItems } from "@dashboard/utils/maps";
+import useMetadataChangeTrigger from "@dashboard/utils/metadata/useMetadataChangeTrigger";
+import { type Option } from "@saleor/macaw-ui-next";
+import type * as React from "react";
+import { useCallback, useEffect, useMemo } from "react";
+import { useIntl } from "react-intl";
+import slugify from "slugify";
+
+import AttributeDetails from "../AttributeDetails";
+import AttributeOrganization from "../AttributeOrganization";
+import AttributeProperties from "../AttributeProperties";
+import { AttributeReferenceTypesSection } from "../AttributeReferenceTypesSection/AttributeReferenceTypesSection";
+import { AttributeValues } from "../AttributeValues/AttributeValues";
+import { messages } from "./messages";
+import { AttributeDetailsTitle } from "./Title";
+
+function AttributePageDirtyStateSync({
+  attribute,
+  isSaveDisabled,
+  triggerChange,
+}: {
+  attribute?: AttributePageProps["attribute"];
+  isSaveDisabled?: boolean;
+  triggerChange: (value?: boolean) => void;
+}) {
+  // Derive the exit-dialog dirty flag from the pristine comparison instead of
+  // marking it imperatively. Running it in an effect (after render/navigation)
+  // is important: marking the form dirty synchronously inside a handler that
+  // also navigates would make the exit-form guard block that same-page navigation.
+  useEffect(() => {
+    if (!attribute) {
+      return;
+    }
+
+    triggerChange(!isSaveDisabled);
+  }, [attribute, isSaveDisabled, triggerChange]);
+
+  return null;
+}
+
+interface AttributePageProps {
+  attribute?: AttributeDetailsQuery["attribute"] | null | undefined;
+  assignedTypes?: AttributeAssignedTypesCardProps;
+  disabled: boolean;
+  errors: AttributeErrorFragment[];
+  saveButtonBarState: ConfirmButtonTransitionState;
+  values?: NonNullable<AttributeDetailsQuery["attribute"]>["choices"] | undefined;
+  onDelete: () => void;
+  onShowMetadata?: () => void;
+  onSubmit: (data: AttributePageFormData) => SubmitPromise;
+  onValueAdd: () => void;
+  onValueDelete: (id: string) => void;
+  onValueReorder: ReorderAction;
+  onValueUpdate: (id: string) => void;
+  settings?: ListSettings;
+  onUpdateListSettings?: ListSettingsUpdate;
+  pageInfo: {
+    hasNextPage: boolean;
+    hasPreviousPage: boolean;
+  };
+  onNextPage: () => void;
+  onPreviousPage: () => void;
+  searchQuery?: string;
+  onSearchChange?: (query: string) => void;
+  children: (data: AttributePageFormData) => React.ReactNode;
+  defaultAttributeType?: AttributeTypeEnum;
+}
+
+export interface AttributePageFormData extends MetadataFormData {
+  type?: AttributeTypeEnum;
+  availableInGrid: boolean;
+  filterableInDashboard: boolean;
+  inputType: AttributeInputTypeEnum;
+  entityType: AttributeEntityTypeEnum | null;
+  filterableInStorefront: boolean;
+  name: string;
+  slug: string;
+  storefrontSearchPosition: string;
+  valueRequired: boolean;
+  unit: MeasurementUnitsEnum | null | undefined;
+  visibleInStorefront: boolean;
+  referenceTypes: Option[];
+}
+
+const AttributePage = ({
+  attribute,
+  assignedTypes,
+  disabled,
+  errors: apiErrors,
+  saveButtonBarState,
+  values,
+  onDelete,
+  onShowMetadata,
+  onSubmit,
+  onValueAdd,
+  onValueDelete,
+  onValueReorder,
+  onValueUpdate,
+  settings,
+  onUpdateListSettings,
+  pageInfo,
+  onNextPage,
+  onPreviousPage,
+  searchQuery,
+  onSearchChange,
+  children,
+  defaultAttributeType,
+}: AttributePageProps) => {
+  const intl = useIntl();
+  const { lastUsedLocaleOrFallback } = useCachedLocales();
+  const { user } = useUser();
+  const canTranslate = user && hasPermission(PermissionEnum.MANAGE_TRANSLATIONS, user);
+  const navigate = useNavigator();
+  const { makeChangeHandler: makeMetadataChangeHandler } = useMetadataChangeTrigger();
+  const isCreate = attribute === null;
+  const initialForm = useMemo(
+    () => getAttributePageInitialForm(attribute, defaultAttributeType),
+    [attribute, defaultAttributeType],
+  );
+  const checkIfSaveIsDisabled = useCallback(
+    (data: AttributePageFormData) => {
+      if (disabled) {
+        return true;
+      }
+
+      if (isCreate) {
+        return false;
+      }
+
+      if (!attribute) {
+        return true;
+      }
+
+      return isAttributeUpdateFormPristine(data, initialForm);
+    },
+    [attribute, disabled, initialForm, isCreate],
+  );
+  const handleSubmit = (data: AttributePageFormData) => {
+    const type = attribute === null ? data.type : undefined;
+
+    return onSubmit({
+      ...data,
+      slug: data.slug || slugify(data.name).toLowerCase(),
+      type,
+    });
+  };
+
+  const attributePageBackLink = useBackLinkWithState({
+    path: attributeListPath,
+  });
+  const productRefSearch = useProductTypeSearch({ variables: DEFAULT_INITIAL_SEARCH_DATA });
+  const pageRefSearch = usePageTypeSearch({ variables: DEFAULT_INITIAL_SEARCH_DATA });
+
+  return (
+    <Form
+      confirmLeave
+      initial={initialForm}
+      onSubmit={handleSubmit}
+      disabled={disabled}
+      checkIfSaveIsDisabled={checkIfSaveIsDisabled}
+    >
+      {({
+        change,
+        set,
+        data,
+        isSaveDisabled,
+        isSubmitting,
+        submit,
+        errors,
+        setError,
+        clearErrors,
+        triggerChange,
+      }) => {
+        const changeMetadata = makeMetadataChangeHandler(change);
+        const activeRefSearch =
+          data.entityType === AttributeEntityTypeEnum.PAGE ? pageRefSearch : productRefSearch;
+
+        const referenceTypes = mapEdgesToItems<{ id: string; name: string }>(
+          activeRefSearch.result.data?.search,
+        );
+
+        const fetchMoreReferenceTypes = getSearchFetchMoreProps(
+          activeRefSearch.result as CommonSearchOpts,
+          activeRefSearch.loadMore,
+        );
+
+        const referenceTypeOptions = (referenceTypes ?? []).map(type => ({
+          label: type.name,
+          value: type.id,
+        }));
+
+        // Clear reference types in case entityType changes, as it may affect available options
+        const handleChange = (event: ChangeEvent) => {
+          const fieldName = event.target?.name;
+
+          if (isCreate && fieldName === "entityType") {
+            set({ referenceTypes: [] });
+            triggerChange();
+          }
+
+          change(event);
+        };
+        const showReferenceTypes = data.entityType
+          ? REFERENCE_ATTRIBUTE_TYPES.includes(data.inputType) &&
+            ENTITY_TYPES_WITH_TYPES_RESTRICTION.includes(data.entityType)
+          : false;
+
+        return (
+          <>
+            <AttributePageDirtyStateSync
+              attribute={attribute}
+              isSaveDisabled={isSaveDisabled}
+              triggerChange={triggerChange}
+            />
+            <DetailPageLayout>
+              <TopNav
+                href={attributePageBackLink}
+                title={
+                  attribute === null ? (
+                    intl.formatMessage({
+                      id: "8cUEPV",
+                      defaultMessage: "Create New Attribute",
+                      description: "page title",
+                    })
+                  ) : (
+                    <AttributeDetailsTitle
+                      attribute={
+                        attribute
+                          ? {
+                              name: attribute.name,
+                              type: attribute.type,
+                            }
+                          : null
+                      }
+                      loading={disabled}
+                    />
+                  )
+                }
+                actionsGap={3}
+              >
+                {attribute !== null && onShowMetadata && (
+                  <TopNav.MetadataButton
+                    onClick={onShowMetadata}
+                    disabled={!attribute}
+                    data-test-id="show-attribute-metadata"
+                    title={intl.formatMessage(messages.editAttributeMetadata)}
+                    ripple={rippleAttributeViewOverhaul}
+                  />
+                )}
+                {canTranslate && (
+                  <TranslationsButton
+                    onClick={() =>
+                      navigate(
+                        languageEntityUrl(
+                          lastUsedLocaleOrFallback,
+                          TranslatableEntities.attributes,
+                          attribute?.id ?? "",
+                        ),
+                      )
+                    }
+                  />
+                )}
+              </TopNav>
+              <DetailPageLayout.Content>
+                <AttributeDetails
+                  canChangeType={isCreate}
+                  data={data}
+                  disabled={disabled}
+                  apiErrors={apiErrors}
+                  onChange={handleChange}
+                  onUnitChange={unit => {
+                    if ((data.unit ?? null) !== (unit ?? null)) {
+                      set({ unit });
+                      triggerChange();
+                    }
+                  }}
+                  errors={errors}
+                  setError={setError}
+                  clearErrors={clearErrors}
+                />
+                <CardSpacer />
+                {showReferenceTypes && (
+                  <AttributeReferenceTypesSection
+                    disabled={disabled}
+                    entityType={data.entityType ?? undefined}
+                    fetchMore={fetchMoreReferenceTypes}
+                    fetchOptions={activeRefSearch.search}
+                    loading={Boolean(fetchMoreReferenceTypes?.loading)}
+                    onChange={event => set({ referenceTypes: event.target.value })}
+                    options={referenceTypeOptions}
+                    value={data.referenceTypes}
+                  />
+                )}
+                {ATTRIBUTE_TYPES_WITH_DEDICATED_VALUES.includes(data.inputType) && (
+                  <>
+                    <AttributeValues
+                      inputType={data.inputType}
+                      disabled={disabled}
+                      values={mapEdgesToItems(values)}
+                      onValueAdd={onValueAdd}
+                      onValueDelete={onValueDelete}
+                      onValueReorder={onValueReorder}
+                      onValueUpdate={onValueUpdate}
+                      settings={settings}
+                      onUpdateListSettings={onUpdateListSettings}
+                      pageInfo={pageInfo}
+                      onNextPage={onNextPage}
+                      onPreviousPage={onPreviousPage}
+                      searchQuery={searchQuery}
+                      onSearchChange={onSearchChange}
+                    />
+                  </>
+                )}
+                {attribute === null && (
+                  <Metadata data={data} isLoading={disabled} onChange={changeMetadata} />
+                )}
+              </DetailPageLayout.Content>
+              <DetailPageLayout.RightSidebar>
+                {attribute === null && (
+                  <>
+                    <AttributeOrganization data={data} disabled={disabled} onChange={change} />
+                    <CardSpacer />
+                  </>
+                )}
+                <AttributeProperties
+                  data={data}
+                  errors={apiErrors}
+                  disabled={disabled}
+                  onChange={change}
+                />
+                {assignedTypes && (
+                  <>
+                    <CardSpacer />
+                    <AttributeAssignedTypesCard {...assignedTypes} />
+                  </>
+                )}
+              </DetailPageLayout.RightSidebar>
+              <Savebar>
+                {attribute !== null && <Savebar.DeleteButton onClick={onDelete} />}
+                <Savebar.Spacer />
+                <Savebar.CancelButton onClick={() => navigate(attributePageBackLink)} />
+                <Savebar.ConfirmButton
+                  transitionState={isSubmitting ? "loading" : saveButtonBarState}
+                  onClick={submit}
+                  disabled={!!isSaveDisabled}
+                />
+              </Savebar>
+            </DetailPageLayout>
+            {children(data)}
+          </>
+        );
+      }}
+    </Form>
+  );
+};
+
+AttributePage.displayName = "AttributePage";
+export default AttributePage;
