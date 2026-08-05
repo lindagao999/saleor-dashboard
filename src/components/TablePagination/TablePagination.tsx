@@ -7,7 +7,7 @@ import {
   PaginationRowNumberSelect,
   type PaginationRowNumberSelectLabels,
 } from "@saleor/macaw-ui";
-import { Box, Button } from "@saleor/macaw-ui-next";
+import { Box, Button, Text } from "@saleor/macaw-ui-next";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import type * as React from "react";
 import { useIntl } from "react-intl";
@@ -38,6 +38,8 @@ export interface PaginationProps
   nextHref?: string;
   disabled?: boolean;
   labels?: PaginationRowNumberSelectLabels;
+  /** Total number of rows in the current (filtered) list, used to display total count and total pages */
+  totalCount?: number;
 }
 
 const choices = [10, 20, 30, 50, 100];
@@ -57,6 +59,7 @@ export const TablePagination = ({
   labels,
   onNextPage,
   onPreviousPage,
+  totalCount,
 }: PaginationProps) => {
   const intl = useIntl();
   const navigate = useNavigator();
@@ -72,6 +75,8 @@ export const TablePagination = ({
   const handleRowNumberChange = onUpdateListSettings
     ? (value: number) => onUpdateListSettings("rowNumber", value)
     : onRowNumberChange;
+  const totalPages =
+    totalCount != null && currentRowNumber ? Math.ceil(totalCount / currentRowNumber) : undefined;
 
   const content = (
     <Box display="flex" justifyContent="space-between" alignItems="center">
@@ -85,6 +90,19 @@ export const TablePagination = ({
         />
       ) : (
         <Box />
+      )}
+
+      {totalCount != null && totalPages != null && (
+        <Text size={2}>
+          {intl.formatMessage(
+            {
+              id: "V7s1cT",
+              defaultMessage: "{count} products · {pages} pages",
+              description: "pagination total count and total pages",
+            },
+            { count: totalCount, pages: totalPages },
+          )}
+        </Text>
       )}
 
       <Box display="flex" flexDirection="row" alignItems="center" gap={2}>

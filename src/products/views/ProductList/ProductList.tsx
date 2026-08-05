@@ -338,6 +338,7 @@ const ProductList = ({ params }: ProductListProps) => {
         selectedProductIds={selectedRowIds}
         onSelectProductIds={handleSetSelectedProductIds}
         clearRowSelection={clearRowSelection}
+        totalCount={data?.products?.totalCount}
       />
       <ProductBulkDeleteDialog
         open={params.action === "delete"}

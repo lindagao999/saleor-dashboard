@@ -6658,6 +6658,10 @@
     "context": "product detail page, top-bar metadata button tooltip",
     "string": "Edit product metadata"
   },
+  "V7s1cT": {
+    "context": "pagination total count and total pages",
+    "string": "{count} products · {pages} pages"
+  },
   "V8FhTt": {
     "context": "collection label",
     "string": "Hidden"

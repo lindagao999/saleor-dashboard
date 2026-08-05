@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
+import { useIntl } from "react-intl";
 
 import { type ListSettings } from "../../types";
 import { TablePagination } from "./TablePagination";
@@ -8,6 +9,23 @@ const mockNavigate = jest.fn();
 jest.mock("@dashboard/hooks/useNavigator", () => () => mockNavigate);
 
 describe("TablePagination", () => {
+  // The global react-intl mock returns the raw defaultMessage without
+  // interpolating values - override it here to validate message formatting.
+  beforeEach(() => {
+    (useIntl as jest.Mock).mockReturnValue({
+      formatMessage: jest.fn((descriptor, values) =>
+        descriptor.defaultMessage.replace(
+          /\{(\w+)\}/g,
+          (match: string, key: string) => (values && key in values ? String(values[key]) : match),
+        ),
+      ),
+      formatDate: jest.fn(x => x),
+      formatTime: jest.fn(x => x),
+      formatNumber: jest.fn(x => x),
+      locale: "en",
+    });
+  });
+
   const defaultProps = {
     hasNextPage: true,
     hasPreviousPage: true,
@@ -75,5 +93,26 @@ describe("TablePagination", () => {
     fireEvent.click(screen.getByTestId("button-pagination-back"));
     expect(mockNavigate).toHaveBeenCalledTimes(2);
     expect(mockNavigate).toHaveBeenCalledWith("/prev");
+  });
+
+  it("renders total count and total pages when totalCount is provided", () => {
+    // Arrange
+    const settings: ListSettings = {
+      rowNumber: 20,
+    };
+
+    // Act
+    render(<TablePagination {...defaultProps} settings={settings} totalCount={42} />);
+
+    // Assert
+    expect(screen.getByText("42 products · 3 pages")).toBeInTheDocument();
+  });
+
+  it("does not render total count when totalCount is not provided", () => {
+    // Arrange
+    render(<TablePagination {...defaultProps} />);
+
+    // Assert
+    expect(screen.queryByText(/products · .* pages/)).not.toBeInTheDocument();
   });
 });

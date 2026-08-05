@@ -49,10 +49,10 @@ import { ProductListViewSwitch } from "../ProductListViewSwitch";
 
 interface ProductListPageProps
   extends PageListProps<ProductListColumns>,
-    SearchPageProps,
-    Omit<TabPageProps, "onTabDelete" | "onTabDelete">,
-    SortPage<ProductListUrlSortField>,
-    ChannelProps {
+  SearchPageProps,
+  Omit<TabPageProps, "onTabDelete" | "onTabDelete">,
+  SortPage<ProductListUrlSortField>,
+  ChannelProps {
   activeAttributeSortId: string;
   currencySymbol: string;
   gridAttributesOpts: LazyQueryResult<
@@ -74,6 +74,8 @@ interface ProductListPageProps
   onSelectProductIds: (ids: number[], clearSelection: () => void) => void;
   clearRowSelection: () => void;
   filterDependency?: FilterElement;
+  /** Total number of products in the current (filtered) list */
+  totalCount?: number;
 }
 
 export type ProductListViewType = "datagrid" | "tile";

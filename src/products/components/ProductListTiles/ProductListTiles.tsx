@@ -15,6 +15,8 @@ interface ProductListTilesProps extends ListProps<ProductListColumns> {
   products: RelayToFlat<ProductListQuery["products"]> | undefined;
   loading?: boolean;
   onTileClick: (id: string) => void;
+  /** Total number of products in the current (filtered) list */
+  totalCount?: number;
 }
 
 export const ProductListTiles = ({
@@ -24,6 +26,7 @@ export const ProductListTiles = ({
   disabled,
   loading,
   onUpdateListSettings,
+  totalCount,
 }: ProductListTilesProps) => {
   const intl = useIntl();
   const renderContent = useCallback(() => {
@@ -78,6 +81,7 @@ export const ProductListTiles = ({
           }),
         }}
         onUpdateListSettings={onUpdateListSettings}
+        totalCount={totalCount}
       />
     </>
   );

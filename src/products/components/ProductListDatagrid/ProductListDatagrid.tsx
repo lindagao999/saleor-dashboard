@@ -52,9 +52,9 @@ import { usePriceClick } from "./usePriceClick";
 
 interface ProductListDatagridProps
   extends ListProps<ProductListColumns>,
-    PageListProps<ProductListColumns>,
-    SortPage<ProductListUrlSortField>,
-    ChannelProps {
+  PageListProps<ProductListColumns>,
+  SortPage<ProductListUrlSortField>,
+  ChannelProps {
   activeAttributeSortId: string;
   gridAttributesOpts: LazyQueryResult<
     GridAttributesQuery,
@@ -69,6 +69,8 @@ interface ProductListDatagridProps
   onSelectProductIds: (rowsIndex: number[], clearSelection: () => void) => void;
   hasRowHover?: boolean;
   loading: boolean;
+  /** Total number of products in the current (filtered) list */
+  totalCount?: number;
 }
 
 export const ProductListDatagrid = ({
@@ -88,6 +90,7 @@ export const ProductListDatagrid = ({
   onSelectProductIds,
   hasRowHover,
   rowAnchor,
+  totalCount,
 }: ProductListDatagridProps) => {
   const isChannelSelected = !!selectedChannelId;
   const intl = useIntl();
@@ -294,6 +297,7 @@ export const ProductListDatagrid = ({
           settings={settings}
           disabled={disabled}
           onUpdateListSettings={onUpdateListSettings}
+          totalCount={totalCount}
         />
       </DatagridChangeStateContext.Provider>
     </Box>
