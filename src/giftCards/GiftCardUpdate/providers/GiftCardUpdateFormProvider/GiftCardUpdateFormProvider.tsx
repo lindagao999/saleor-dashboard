@@ -93,10 +93,10 @@ const GiftCardUpdateFormProvider = ({ children }: GiftCardUpdateFormProviderProp
       notify(
         hasExpiryError
           ? {
-              title: intl.formatMessage(giftCardUpdateFormMessages.giftCardInvalidExpiryDateHeader),
-              text: intl.formatMessage(giftCardUpdateFormMessages.giftCardInvalidExpiryDateContent),
-              status: "error",
-            }
+            title: intl.formatMessage(giftCardUpdateFormMessages.giftCardInvalidExpiryDateHeader),
+            text: intl.formatMessage(giftCardUpdateFormMessages.giftCardInvalidExpiryDateContent),
+            status: "error",
+          }
           : getDefaultNotifierSuccessErrorData(errors, intl),
       );
     },
@@ -110,7 +110,9 @@ const GiftCardUpdateFormProvider = ({ children }: GiftCardUpdateFormProviderProp
       variables: {
         id: giftCard.id,
         input: {
-          expiryDate,
+          // Backend `expiryDate` is a Date - send null when the field is empty
+          // instead of an empty string, which the API rejects with a 400.
+          expiryDate: expiryDate || null,
           ...getGiftCardTagsAddRemoveData(
             giftCard.tags.map(el => el.name),
             tags.map(el => el.value),
