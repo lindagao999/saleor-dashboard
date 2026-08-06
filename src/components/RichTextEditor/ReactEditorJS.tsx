@@ -30,6 +30,10 @@ class ClientEditorCore implements EditorCore {
   }
 
   public async clear() {
+    if (!this._editorJS || typeof this._editorJS.clear !== "function") {
+      return;
+    }
+
     await this._editorJS.clear();
   }
 
@@ -55,7 +59,19 @@ class ClientEditorCore implements EditorCore {
   }
 
   public async render(data: OutputData) {
-    await this._editorJS.render(data);
+    // The underlying Editor.js instance may already be destroyed (e.g. when the
+    // form re-renders with a new defaultValue right after an unmount/remount).
+    // Calling render() on such an instance throws "render is not a function",
+    // so guard against it and ignore the stale update.
+    if (!this._editorJS || typeof this._editorJS.render !== "function") {
+      return;
+    }
+
+    try {
+      await this._editorJS.render(data);
+    } catch {
+      // Editor was destroyed mid-render; the field will be re-initialized on next mount.
+    }
   }
 
   /**

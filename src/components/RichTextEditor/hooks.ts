@@ -49,8 +49,13 @@ export const useUpdateOnRerender = ({
       return;
     }
 
-    renderRef.current?.({
-      blocks: defaultValue?.blocks ?? [],
-    });
+    try {
+      renderRef.current?.({
+        blocks: defaultValue?.blocks ?? [],
+      });
+    } catch {
+      // Editor instance may have been torn down between renders (e.g. right after
+      // saving); skip updating the stale content - it re-initializes on remount.
+    }
   }, [defaultValue, hasRendered, isEditorReady, renderRef]);
 };
